@@ -1,0 +1,188 @@
+# ==============================================================================
+# Capa: Core / Infrastructure (API Contract Specification)
+# Responsabilidad: Contrato JSON/REST congelado (Contract-First) entre Flutter,
+#   Gateway, WebFlux y PyCUDA. Incluye endpoints de perfil, CRUD completo de
+#   publicaciones (GET/POST/PATCH/DELETE), comentarios, likes, catálogo de
+#   filtros (/filters), procesamiento GPU, historial y salud de GPU (/health).
+# Regla de Dependencia: Define los esquemas de entrada/salida para los
+#   adaptadores de entrada/salida (Controllers, DTOs, WebClients y Datasources
+#   de Flutter). Ninguna capa de dominio depende directamente de este archivo,
+#   pero los adaptadores de infraestructura deben cumplirlo estrictamente.
+# ==============================================================================
+
+openapi: 3.0.3
+info:
+  title: UPSGlam Platform API Contract
+  description: >-
+    Contrato REST reactivo (Contract-First) para la plataforma móvil de
+    procesamiento paralelo de imágenes en GPU (UPSGlam).
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080/api/v1
+    description: API Gateway Local / Red Local
+paths:
+  /processing/filters:
+    get:
+      summary: Listar los 6 filtros CUDA disponibles y sus parámetros permitidos
+      tags:
+        - Processing
+      responses:
+        '200':
+          description: Catálogo de filtros (MEDIA, NITIDEZ, LAPLACIANO, UPS_IDENTITY, EXTRA_1, EXTRA_2)
+  /processing/jobs:
+    post:
+      summary: Solicitar procesamiento de imagen en GPU (PyCUDA)
+      tags:
+        - Processing
+      responses:
+        '200':
+          description: Imagen procesada con métricas de GPU reales
+        '400':
+          description: Formato real de imagen o parámetros inválidos
+        '429':
+          description: Cola de GPU llena (QueueCapacityExceededError)
+        '503':
+          description: GPU no disponible (GpuUnavailableError)
+  /processing/history:
+    get:
+      summary: Consultar historial de processing_requests y gpu_metrics del usuario autenticado
+      tags:
+        - Processing
+      responses:
+        '200':
+          description: Historial de procesamiento del usuario autenticado
+  /social/profile/me:
+    get:
+      summary: Obtener perfil del usuario autenticado
+      tags:
+        - Profile
+      responses:
+        '200':
+          description: Datos del perfil del usuario
+    patch:
+      summary: Actualizar perfil del usuario autenticado (username, bio, avatar)
+      tags:
+        - Profile
+      responses:
+        '200':
+          description: Perfil actualizado
+  /social/posts:
+    get:
+      summary: Obtener feed cronológico de publicaciones
+      tags:
+        - Social
+      responses:
+        '200':
+          description: Flujo de publicaciones paginado
+    post:
+      summary: Crear una nueva publicación referenciando processing_request_id
+      tags:
+        - Social
+      responses:
+        '201':
+          description: Publicación creada exitosamente
+  /social/posts/{postId}:
+    patch:
+      summary: Editar descripción (caption) de una publicación propia
+      tags:
+        - Social
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Publicación actualizada
+        '403':
+          description: El usuario no es propietario de la publicación
+    delete:
+      summary: Eliminar una publicación propia
+      tags:
+        - Social
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Publicación eliminada
+        '403':
+          description: El usuario no es propietario de la publicación
+  /social/posts/{postId}/likes:
+    post:
+      summary: Registrar o alternar reacción (like) en una publicación
+      tags:
+        - Interactions
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Estado de like actualizado
+  /social/posts/{postId}/comments:
+    get:
+      summary: Listar comentarios de una publicación
+      tags:
+        - Interactions
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lista de comentarios
+    post:
+      summary: Agregar comentario a una publicación
+      tags:
+        - Interactions
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: Comentario registrado
+  /internal/gpu/process:
+    post:
+      summary: Endpoint interno de ms-gpu-pycuda para ejecución de kernels CUDA
+      tags:
+        - Internal GPU
+      responses:
+        '200':
+          description: Imagen procesada, almacenada temporalmente y métricas de hardware CUDA
+  /internal/gpu/health:
+    get:
+      summary: Diagnóstico general y disponibilidad de hardware NVIDIA CUDA
+      tags:
+        - Internal GPU
+      responses:
+        '200':
+          description: Contexto CUDA activo y operativo
+        '503':
+          description: Sin GPU NVIDIA disponible
+  /internal/gpu/health/gpu:
+    get:
+      summary: Diagnóstico detallado de memoria VRAM y contexto CUDA
+      tags:
+        - Internal GPU
+      responses:
+        '200':
+          description: Contexto CUDA activo y operativo
+        '503':
+          description: Sin GPU NVIDIA disponible

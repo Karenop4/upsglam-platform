@@ -1,0 +1,80 @@
+# ==============================================================================
+# Capa: Infrastructure (DevOps / Container Orchestration)
+# Responsabilidad: Orquestación de api-gateway, ms-social, ms-processing y
+#   ms-gpu-pycuda (con soporte NVIDIA GPU). Red interna compartida sin usar
+#   localhost entre contenedores.
+# Regla de Dependencia: Define la topología de despliegue y variables de entorno
+#   para todos los microservicios; no contiene lógica de negocio ni acoplamiento
+#   a código fuente interno, comunicando contenedores exclusivamente por DNS
+#   de la red interna (upsglam-network).
+# ==============================================================================
+
+services:
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+    container_name: upsglam-api-gateway
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - MS_SOCIAL_URI=http://ms-social:8081
+      - MS_PROCESSING_URI=http://ms-processing:8082
+    depends_on:
+      - ms-social
+      - ms-processing
+    networks:
+      - upsglam-network
+
+  ms-social:
+    build:
+      context: ./services/ms-social
+    container_name: upsglam-ms-social
+    expose:
+      - "8081"
+    env_file:
+      - path: .env
+        required: false
+    networks:
+      - upsglam-network
+
+  ms-processing:
+    build:
+      context: ./services/ms-processing
+    container_name: upsglam-ms-processing
+    expose:
+      - "8082"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - GPU_SERVICE_URI=http://ms-gpu-pycuda:8000
+    depends_on:
+      - ms-gpu-pycuda
+    networks:
+      - upsglam-network
+
+  ms-gpu-pycuda:
+    build:
+      context: ./services/ms-gpu-pycuda
+    container_name: upsglam-ms-gpu-pycuda
+    expose:
+      - "8000"
+    env_file:
+      - path: .env
+        required: false
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - upsglam-network
+
+networks:
+  upsglam-network:
+    driver: bridge

@@ -1,0 +1,12 @@
+# ==============================================================================
+# Capa: Infrastructure (Docker Build Ignore Rules)
+# Responsabilidad: Evitar que cachés de Python o entornos virtuales locales se
+#   copien al contexto de construcción de la imagen Docker de ms-gpu-pycuda.
+# Regla de Dependencia: Aplica al contexto de services/ms-gpu-pycuda.
+# ==============================================================================
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/

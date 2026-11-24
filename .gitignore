@@ -1,0 +1,22 @@
+# ==============================================================================
+# Capa: Infrastructure (Version Control Ignore Rules)
+# Responsabilidad: Excluir artefactos de compilación, entornos virtuales, caches
+#   y archivos .env con secretos reales del control de versiones.
+# Regla de Dependencia: Aplica transversalmente a la raíz del monorepo.
+# ==============================================================================
+
+.env
+.env.local
+target/
+*.class
+*.jar
+*.war
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+mobile-app/.dart_tool/
+mobile-app/build/
+.idea/
+.vscode/
+*.DS_Store
