@@ -1,0 +1,60 @@
+# ==============================================================================
+# Capa: Infrastructure (API Gateway Runtime Configuration)
+# Responsabilidad: Puerto, validación JWT de Supabase, destinos internos,
+#   timeouts del cliente HTTP, límites de petición y exposición mínima de
+#   Actuator. Todos los valores sensibles o dependientes del entorno llegan por
+#   variables de entorno (docker-compose / .env); no hay secretos aquí.
+# Regla de Dependencia: Consumido por SupabaseSecurityProperties,
+#   DownstreamServicesProperties y la autoconfiguración de Spring.
+# ==============================================================================
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: api-gateway
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 3000          # ms
+            response-timeout: 15s          # por defecto; cada ruta lo sobrescribe
+            pool:
+              max-idle-time: 30s
+
+upsglam:
+  security:
+    supabase:
+      jwks-url: ${SUPABASE_JWKS_URL}
+      issuer: ${SUPABASE_URL}/auth/v1
+      audience: authenticated
+      # Opcional: solo si el proyecto aún emite tokens HS256 legados.
+      legacy-jwt-secret: ${SUPABASE_JWT_SECRET:}
+  gateway:
+    max-request-size: ${GATEWAY_MAX_REQUEST_SIZE:10MB}
+    social:
+      url: ${MS_SOCIAL_URL:http://ms-social:8081}
+      response-timeout: ${MS_SOCIAL_TIMEOUT:10s}
+    processing:
+      url: ${MS_PROCESSING_URL:http://ms-processing:8082}
+      response-timeout: ${MS_PROCESSING_TIMEOUT:60s}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    ec.edu.ups.gateway: INFO
