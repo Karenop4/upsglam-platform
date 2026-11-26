@@ -16,10 +16,20 @@ info:
   description: >-
     Contrato REST reactivo (Contract-First) para la plataforma móvil de
     procesamiento paralelo de imágenes en GPU (UPSGlam).
+
+
+    Todas las rutas públicas pasan por el API Gateway y requieren
+    `Authorization: Bearer <JWT de Supabase Auth>`. El Gateway responde 401
+    (token inválido/ausente), 403 (ruta no permitida), 413 (cuerpo > 10 MB),
+    503 (servicio no disponible) y 504 (timeout) con el esquema `GatewayError`.
+    El Gateway recorta el prefijo `/api/v1` antes de reenviar a los
+    microservicios. Ver docs/architecture/api-gateway.md.
   version: 1.0.0
 servers:
   - url: http://localhost:8080/api/v1
     description: API Gateway Local / Red Local
+security:
+  - supabaseBearer: []
 paths:
   /processing/filters:
     get:
@@ -158,6 +168,12 @@ paths:
       responses:
         '201':
           description: Comentario registrado
+  # ---------------------------------------------------------------------------
+  # Endpoints INTERNOS de ms-gpu-pycuda (http://ms-gpu-pycuda:8000, red Docker
+  # gpu-internal). NO se exponen a través del API Gateway (responde 401/403);
+  # solo ms-processing puede invocarlos. Se documentan aquí como contrato
+  # entre ms-processing y ms-gpu-pycuda.
+  # ---------------------------------------------------------------------------
   /internal/gpu/process:
     post:
       summary: Endpoint interno de ms-gpu-pycuda para ejecución de kernels CUDA
@@ -186,3 +202,33 @@ paths:
           description: Contexto CUDA activo y operativo
         '503':
           description: Sin GPU NVIDIA disponible
+components:
+  securitySchemes:
+    supabaseBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Access token de Supabase Auth (ES256 vía JWKS; HS256 legado opcional).
+        Se validan exp, nbf, iss (${SUPABASE_URL}/auth/v1), aud (authenticated)
+        y sub.
+  schemas:
+    GatewayError:
+      type: object
+      required: [timestamp, status, error, message, path]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          example: 401
+        error:
+          type: string
+          example: Unauthorized
+        message:
+          type: string
+          example: Token ausente, inválido o expirado
+        path:
+          type: string
+          example: /api/v1/social/posts
