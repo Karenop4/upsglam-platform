@@ -1,80 +1,160 @@
 # ==============================================================================
 # Capa: Infrastructure (DevOps / Container Orchestration)
 # Responsabilidad: Orquestación de api-gateway, ms-social, ms-processing y
-#   ms-gpu-pycuda (con soporte NVIDIA GPU). Red interna compartida sin usar
-#   localhost entre contenedores.
+#   ms-gpu-pycuda (con soporte NVIDIA GPU). Comunicación exclusivamente por DNS
+#   de redes internas, sin localhost entre contenedores.
+#   - backend:      gateway <-> ms-social / ms-processing (con salida a internet
+#                   para Supabase).
+#   - gpu-internal: ms-processing <-> ms-gpu-pycuda, SIN salida a internet.
+#   Solo el gateway publica un puerto en el host.
 # Regla de Dependencia: Define la topología de despliegue y variables de entorno
 #   para todos los microservicios; no contiene lógica de negocio ni acoplamiento
-#   a código fuente interno, comunicando contenedores exclusivamente por DNS
-#   de la red interna (upsglam-network).
+#   a código fuente interno.
+# Escalado: no se usa container_name, por lo que es posible
+#   `docker compose up -d --scale ms-social=2` (el DNS de Docker balancea).
 # ==============================================================================
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-java-healthcheck: &java-healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 60s
 
 services:
   api-gateway:
+    <<: *hardening
     build:
       context: ./services/api-gateway
-    container_name: upsglam-api-gateway
+      dockerfile: Dockerfile
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
-    env_file:
-      - path: .env
-        required: false
     environment:
-      - MS_SOCIAL_URI=http://ms-social:8081
-      - MS_PROCESSING_URI=http://ms-processing:8082
+      - SERVER_PORT=8080
+      - MS_SOCIAL_URL=http://ms-social:8081
+      - MS_PROCESSING_URL=http://ms-processing:8082
+      - MS_SOCIAL_TIMEOUT=${MS_SOCIAL_TIMEOUT:-10s}
+      - MS_PROCESSING_TIMEOUT=${MS_PROCESSING_TIMEOUT:-60s}
+      - GATEWAY_MAX_REQUEST_SIZE=${GPU_MAX_FILE_SIZE_MB:-10}MB
+      - SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL es obligatorio}
+      - SUPABASE_JWKS_URL=${SUPABASE_JWKS_URL:?SUPABASE_JWKS_URL es obligatorio}
+      # Opcional: solo si el proyecto aún emite tokens HS256 legados.
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
     depends_on:
-      - ms-social
-      - ms-processing
-    networks:
-      - upsglam-network
-
-  ms-social:
-    build:
-      context: ./services/ms-social
-    container_name: upsglam-ms-social
-    expose:
-      - "8081"
-    env_file:
-      - path: .env
-        required: false
-    networks:
-      - upsglam-network
-
-  ms-processing:
-    build:
-      context: ./services/ms-processing
-    container_name: upsglam-ms-processing
-    expose:
-      - "8082"
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      - GPU_SERVICE_URI=http://ms-gpu-pycuda:8000
-    depends_on:
-      - ms-gpu-pycuda
-    networks:
-      - upsglam-network
-
-  ms-gpu-pycuda:
-    build:
-      context: ./services/ms-gpu-pycuda
-    container_name: upsglam-ms-gpu-pycuda
-    expose:
-      - "8000"
-    env_file:
-      - path: .env
-        required: false
+      ms-social:
+        condition: service_healthy
+      ms-processing:
+        condition: service_healthy
     deploy:
       resources:
+        limits:
+          memory: 512m
+    networks:
+      - backend
+
+  ms-social:
+    <<: *hardening
+    build:
+      context: ./services/ms-social
+      dockerfile: Dockerfile
+    expose:
+      - "8081"
+    environment:
+      - SERVER_PORT=8081
+      - SUPABASE_REST_URL=${SUPABASE_REST_URL:?SUPABASE_REST_URL es obligatorio}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY es obligatorio}
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health/readiness"]
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks:
+      - backend
+
+  ms-processing:
+    <<: *hardening
+    build:
+      context: ./services/ms-processing
+      dockerfile: Dockerfile
+    expose:
+      - "8082"
+    environment:
+      - SERVER_PORT=8082
+      - SUPABASE_REST_URL=${SUPABASE_REST_URL:?SUPABASE_REST_URL es obligatorio}
+      - SUPABASE_STORAGE_URL=${SUPABASE_STORAGE_URL:-${SUPABASE_URL}/storage/v1}
+      - SUPABASE_STORAGE_BUCKET=${SUPABASE_STORAGE_BUCKET:-upsglam-images}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY es obligatorio}
+      # Bypassea RLS: usar solo para recuperación de huérfanos y escritura de
+      # gpu_metrics; el resto de operaciones debe usar el JWT del usuario.
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY es obligatorio}
+      - MS_GPU_URL=http://ms-gpu-pycuda:8000
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health/readiness"]
+    depends_on:
+      ms-gpu-pycuda:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+    networks:
+      - backend
+      - gpu-internal
+
+  ms-gpu-pycuda:
+    <<: *hardening
+    build:
+      context: ./services/ms-gpu-pycuda
+      dockerfile: Dockerfile
+    expose:
+      - "8000"
+    environment:
+      - GPU_DEVICE_INDEX=${GPU_DEVICE_INDEX:-0}
+      - GPU_MAX_CONCURRENT_TASKS=${GPU_MAX_CONCURRENT_TASKS:-4}
+      - GPU_QUEUE_MAX_SIZE=${GPU_QUEUE_MAX_SIZE:-16}
+      - GPU_TASK_TIMEOUT_SECONDS=${GPU_TASK_TIMEOUT_SECONDS:-15}
+      - GPU_MAX_IMAGE_WIDTH=${GPU_MAX_IMAGE_WIDTH:-4096}
+      - GPU_MAX_IMAGE_HEIGHT=${GPU_MAX_IMAGE_HEIGHT:-4096}
+      - GPU_MAX_FILE_SIZE_MB=${GPU_MAX_FILE_SIZE_MB:-10}
+      - GPU_TEMP_RESULT_TTL_SECONDS=${GPU_TEMP_RESULT_TTL_SECONDS:-300}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/gpu/health', timeout=4).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 4g
         reservations:
           devices:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
     networks:
-      - upsglam-network
+      - gpu-internal
 
 networks:
-  upsglam-network:
+  backend:
     driver: bridge
+  gpu-internal:
+    driver: bridge
+    internal: true

@@ -1,8 +1,7 @@
 # ==============================================================================
 # Capa: Infrastructure (Python Dependencies)
 # Responsabilidad: Declarar las dependencias del microservicio GPU (FastAPI,
-#   Uvicorn, Pillow, NumPy; PyCUDA se instala sobre la imagen base CUDA en host
-#   con NVIDIA Container Toolkit).
+#   Uvicorn, Pillow, NumPy y PyCUDA, compilado contra la imagen base CUDA devel).
 # Regla de Dependencia: Consumido durante el build del Dockerfile de
 #   ms-gpu-pycuda.
 # ==============================================================================
@@ -12,3 +11,4 @@ uvicorn[standard]>=0.30.0
 python-multipart>=0.0.9
 numpy>=1.26.4
 pillow>=10.4.0
+pycuda>=2025.1

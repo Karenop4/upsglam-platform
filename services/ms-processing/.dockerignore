@@ -1,0 +1,8 @@
+# Evita enviar artefactos locales, IDE y secretos al contexto de build.
+target/
+.idea/
+.vscode/
+*.iml
+.env
+.env.*
+HELP.md
